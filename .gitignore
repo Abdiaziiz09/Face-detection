@@ -1,0 +1,55 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Sensitive or dynamic runtime data
+data/embeddings.pkl
+data/known_faces/*
+!data/known_faces/.gitkeep
+
+logs/*.csv
+!logs/.gitkeep
+
+# Pre-trained deep learning models (auto-downloaded on first run)
+models/*.onnx
+!models/.gitkeep
+
+# Operating system files
+Thumbs.db
+Desktop.ini
+.DS_Store
