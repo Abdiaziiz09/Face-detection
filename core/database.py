@@ -163,6 +163,22 @@ class FaceDatabase:
 
         return True, f"Successfully enrolled '{cleaned_name}' with {len(embeddings_list)} sample(s)."
 
+    def find_matching_identity(self, embedding: np.ndarray) -> Optional[str]:
+        """
+        Checks whether a given face embedding already matches any registered person.
+        Returns the matched person's name if found, or None if unknown.
+        """
+        if not self.embeddings or self.engine is None:
+            return None
+        best_name  = None
+        best_score = -1.0
+        for name, known_emb in self.embeddings.items():
+            score, is_match = self.engine.compare_embeddings(embedding, known_emb)
+            if is_match and score > best_score:
+                best_score = score
+                best_name  = name
+        return best_name
+
     def delete_person(self, person_name: str) -> bool:
         """Deletes a person from the database and removes their files."""
         self.embeddings.pop(person_name, None)

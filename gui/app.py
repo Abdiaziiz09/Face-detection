@@ -1,3 +1,8 @@
+"""
+FaceEngine AI — Simple, friendly Desktop GUI
+Clean layout that anyone can use without technical knowledge.
+"""
+
 import os
 import sys
 import time
@@ -13,975 +18,972 @@ from core.face_engine import FaceEngine
 from core.database import FaceDatabase
 from core.attendance import AttendanceLogger
 
-class ModernFaceApp:
+
+# ─────────────────────────────────────────────
+#  COLOR THEME
+# ─────────────────────────────────────────────
+BG          = "#1a1a2e"   # dark navy background
+PANEL       = "#16213e"   # sidebar / panel
+CARD        = "#0f3460"   # card surface
+BTN_BLUE    = "#4361ee"   # primary blue button
+BTN_GREEN   = "#2dc653"   # start / confirm green
+BTN_RED     = "#e63946"   # stop / delete red
+BTN_GRAY    = "#3a3a5c"   # secondary gray button
+ACCENT      = "#e94560"   # accent / highlight
+WHITE       = "#ffffff"
+TEXT        = "#e0e0e0"
+MUTED       = "#8888aa"
+SUCCESS_CLR = "#2dc653"
+WARN_CLR    = "#f4a261"
+
+
+def _btn(parent, text, color, command, width=None, pady=8):
+    """Helper — creates a flat, rounded-looking button."""
+    kw = dict(
+        text=text,
+        bg=color,
+        fg=WHITE,
+        font=("Segoe UI", 10, "bold"),
+        relief=tk.FLAT,
+        cursor="hand2",
+        activebackground=color,
+        activeforeground=WHITE,
+        pady=pady,
+        command=command,
+    )
+    if width:
+        kw["width"] = width
+    b = tk.Button(parent, **kw)
+    b.bind("<Enter>", lambda e: b.config(bg=_darken(color)))
+    b.bind("<Leave>", lambda e: b.config(bg=color))
+    return b
+
+
+def _darken(hex_color: str) -> str:
+    """Return a slightly darker shade of hex_color."""
+    c = hex_color.lstrip("#")
+    r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    r, g, b = max(0, r - 25), max(0, g - 25), max(0, b - 25)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _label(parent, text, size=10, bold=False, color=TEXT, **kw):
+    weight = "bold" if bold else "normal"
+    return tk.Label(parent, text=text, font=("Segoe UI", size, weight),
+                    bg=parent["bg"], fg=color, **kw)
+
+
+def _sep(parent):
+    tk.Frame(parent, bg="#2a2a4a", height=1).pack(fill=tk.X, pady=10)
+
+
+# ─────────────────────────────────────────────
+#  MAIN APPLICATION
+# ─────────────────────────────────────────────
+class FaceApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("FaceEngine AI • Offline Face Recognition & Attendance System")
-        self.root.geometry("1180x780")
-        self.root.minsize(1020, 680)
-        self.root.configure(bg="#0f111a")
+        self.root.title("FaceEngine AI  •  Face Recognition")
+        self.root.geometry("1100x700")
+        self.root.minsize(900, 600)
+        self.root.configure(bg=BG)
 
-        # Color Palette - Professional Deep Slate & Indigo Theme
-        self.bg_root = "#0f111a"
-        self.bg_sidebar = "#161925"
-        self.bg_card = "#1c2030"
-        self.bg_card_hover = "#242a3e"
-        self.bg_accent = "#252b42"
-        self.border_color = "#2d354d"
-        
-        self.primary = "#4f46e5"          # Indigo
-        self.primary_hover = "#4338ca"
-        self.success = "#10b981"          # Emerald
-        self.success_hover = "#059669"
-        self.danger = "#ef4444"           # Red
-        self.danger_hover = "#dc2626"
-        self.warning = "#f59e0b"          # Amber
-        self.cyan = "#06b6d4"             # Cyan
-        
-        self.text_title = "#ffffff"
-        self.text_main = "#f1f5f9"
-        self.text_muted = "#94a3b8"
-        self.text_dim = "#64748b"
-
-        # Core Engines
-        self.engine = FaceEngine(detector_score_threshold=0.75, cosine_threshold=0.38)
-        self.database = FaceDatabase(engine=self.engine)
+        # ── Core AI Engines ──────────────────────────────────────────
+        self.engine     = FaceEngine(detector_score_threshold=0.75, cosine_threshold=0.38)
+        self.database   = FaceDatabase(engine=self.engine)
         self.attendance = AttendanceLogger()
 
-        # Camera state
-        self.cap = None
+        # ── Camera state ─────────────────────────────────────────────
+        self.cap               = None
         self.is_camera_running = False
-        self.camera_index = 0
-        self.current_frame = None
-        self.last_fps_time = time.time()
-        self.fps = 0.0
+        self.camera_index      = 0
+        self.current_frame     = None
+        self.last_fps_time     = time.time()
+        self.fps               = 0.0
 
-        # Live Enrollment state
-        self.is_enrolling = False
-        self.enroll_target_name = ""
-        self.enroll_samples = []
-        self.enroll_target_count = 5
-        self.enroll_countdown = 0
+        # ── Enrollment state ─────────────────────────────────────────
+        self.is_enrolling       = False
+        self.enroll_name        = ""
+        self.enroll_samples     = []
+        self.enroll_need        = 5
+        self.enroll_countdown   = 0
 
-        # UI State
-        self.status_var = tk.StringVar(value="System Ready. Zero external APIs • 100% Offline.")
-        self.nav_buttons = {}
-        self.active_page = None
+        # ── Status bar text ──────────────────────────────────────────
+        self.status_var = tk.StringVar(value="✅  Ready — 100 % Offline. No internet or API keys needed.")
 
-        self._configure_styles()
-        self._build_main_layout()
-        self._refresh_db_stats()
+        self._build_ui()
+        self._update_identity_count()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Safe shutdown
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+    # ══════════════════════════════════════════════════════════════════
+    #  UI CONSTRUCTION
+    # ══════════════════════════════════════════════════════════════════
+    def _build_ui(self):
+        # ── Left sidebar ─────────────────────────────────────────────
+        sidebar = tk.Frame(self.root, bg=PANEL, width=200)
+        sidebar.pack(side=tk.LEFT, fill=tk.Y)
+        sidebar.pack_propagate(False)
 
-    def _configure_styles(self):
-        style = ttk.Style()
-        style.theme_use("clam")
+        # Logo
+        logo_frame = tk.Frame(sidebar, bg=PANEL, pady=20)
+        logo_frame.pack(fill=tk.X)
+        tk.Label(logo_frame, text="🎭", font=("Segoe UI", 28), bg=PANEL, fg=ACCENT).pack()
+        tk.Label(logo_frame, text="FaceEngine AI", font=("Segoe UI", 12, "bold"),
+                 bg=PANEL, fg=WHITE).pack()
+        tk.Label(logo_frame, text="100 % Offline  •  Free", font=("Segoe UI", 8),
+                 bg=PANEL, fg=MUTED).pack()
 
-        # Modern Treeview Styling
-        style.configure("Treeview",
-                        background=self.bg_card,
-                        foreground=self.text_main,
-                        fieldbackground=self.bg_card,
-                        rowheight=32,
-                        font=("Segoe UI", 9),
-                        borderwidth=0)
-        style.configure("Treeview.Heading",
-                        background=self.bg_accent,
-                        foreground=self.text_title,
-                        font=("Segoe UI", 10, "bold"),
-                        relief="flat",
-                        padding=[8, 6])
-        style.map("Treeview",
-                  background=[("selected", self.primary)],
-                  foreground=[("selected", "#ffffff")])
-        style.map("Treeview.Heading",
-                  background=[("active", self.primary)])
+        tk.Frame(sidebar, bg="#2a2a4a", height=1).pack(fill=tk.X, padx=16, pady=8)
 
-        # Scrollbar
-        style.configure("Vertical.TScrollbar",
-                        background=self.bg_accent,
-                        troughcolor=self.bg_sidebar,
-                        borderwidth=0,
-                        arrowsize=12)
-
-    def _build_main_layout(self):
-        # 1. Left Sidebar Navigation
-        self.sidebar = tk.Frame(self.root, bg=self.bg_sidebar, width=240)
-        self.sidebar.pack(side=tk.LEFT, fill=tk.Y)
-        self.sidebar.pack_propagate(False)
-
-        # Brand / Logo Header
-        brand_frame = tk.Frame(self.sidebar, bg=self.bg_sidebar, pady=22, padx=20)
-        brand_frame.pack(fill=tk.X)
-
-        brand_title = tk.Label(brand_frame, text="⚡ FACE ENGINE", font=("Segoe UI", 14, "bold"),
-                               bg=self.bg_sidebar, fg="#818cf8")
-        brand_title.pack(anchor="w")
-
-        brand_sub = tk.Label(brand_frame, text="Open-Source • Local AI", font=("Segoe UI", 8),
-                             bg=self.bg_sidebar, fg=self.text_dim)
-        brand_sub.pack(anchor="w")
-
-        sep = tk.Frame(self.sidebar, bg=self.border_color, height=1)
-        sep.pack(fill=tk.X, padx=15, pady=(0, 15))
-
-        # Nav Buttons Container
-        self.nav_container = tk.Frame(self.sidebar, bg=self.bg_sidebar)
-        self.nav_container.pack(fill=tk.X, padx=12)
-
+        # Navigation buttons
+        self._nav_buttons = {}
         nav_items = [
-            ("camera", "📹  Live Camera", self.show_camera_page),
-            ("enroll", "➕  Enroll Person", self.show_enroll_page),
-            ("inspect", "🖼️  Inspect Image", self.show_inspect_page),
-            ("database", "👥  Identities DB", self.show_database_page),
-            ("attendance", "📋  Attendance Log", self.show_attendance_page),
-            ("settings", "⚙️  Tuning & Sliders", self.show_settings_page),
+            ("camera",     "📹   Live Camera",      self._show_camera),
+            ("enroll",     "➕   Add New Person",   self._show_enroll),
+            ("inspect",    "🔍   Analyze a Photo",  self._show_inspect),
+            ("people",     "👥   People List",      self._show_people),
+            ("attendance", "📋   Attendance Log",   self._show_attendance),
+            ("settings",   "⚙️   Settings",         self._show_settings),
         ]
+        nav_box = tk.Frame(sidebar, bg=PANEL)
+        nav_box.pack(fill=tk.X, padx=10)
 
-        for key, text, cmd in nav_items:
-            btn = tk.Button(
-                self.nav_container,
-                text=text,
-                font=("Segoe UI", 10, "bold"),
-                anchor="w",
-                padx=16,
-                pady=10,
-                bg=self.bg_sidebar,
-                fg=self.text_muted,
-                activebackground=self.bg_card,
-                activeforeground="#ffffff",
-                relief=tk.FLAT,
-                cursor="hand2",
-                command=cmd
+        for key, label, cmd in nav_items:
+            b = tk.Button(
+                nav_box, text=label,
+                font=("Segoe UI", 10), anchor="w", padx=14, pady=9,
+                bg=PANEL, fg=TEXT,
+                activebackground=BTN_BLUE, activeforeground=WHITE,
+                relief=tk.FLAT, cursor="hand2",
+                command=lambda c=cmd, k=key: self._nav_click(k, c),
             )
-            btn.pack(fill=tk.X, pady=3)
-            self.nav_buttons[key] = btn
+            b.pack(fill=tk.X, pady=2)
+            self._nav_buttons[key] = b
 
-        # Bottom System Info in Sidebar
-        system_box = tk.Frame(self.sidebar, bg=self.bg_card, padx=14, pady=12)
-        system_box.pack(side=tk.BOTTOM, fill=tk.X, padx=14, pady=16)
+        # Sidebar status pill
+        tk.Frame(sidebar, bg="#2a2a4a", height=1).pack(fill=tk.X, padx=16, pady=(0, 8))
+        self._id_count_lbl = tk.Label(sidebar, text="People registered: 0",
+                                      font=("Segoe UI", 9), bg=PANEL, fg=MUTED)
+        self._id_count_lbl.pack(side=tk.BOTTOM, pady=(0, 20))
 
-        tk.Label(system_box, text="MODELS STATUS", font=("Segoe UI", 8, "bold"),
-                 bg=self.bg_card, fg=self.cyan).pack(anchor="w")
-        tk.Label(system_box, text="• Detector: YuNet CNN\n• Recognizer: SFace\n• Mode: 100% Offline",
-                 font=("Segoe UI", 8), justify="left", bg=self.bg_card, fg=self.text_muted).pack(anchor="w", pady=(3, 0))
+        # ── Right content area ────────────────────────────────────────
+        right = tk.Frame(self.root, bg=BG)
+        right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # 2. Main Content Wrapper (Right Side)
-        self.main_wrapper = tk.Frame(self.root, bg=self.bg_root)
-        self.main_wrapper.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        # Page title bar
+        self._title_bar = tk.Frame(right, bg=CARD, height=52)
+        self._title_bar.pack(fill=tk.X)
+        self._title_bar.pack_propagate(False)
 
-        # Top Header Bar
-        self.top_bar = tk.Frame(self.main_wrapper, bg=self.bg_card, height=58, padx=24)
-        self.top_bar.pack(side=tk.TOP, fill=tk.X)
-        self.top_bar.pack_propagate(False)
+        self._page_title = tk.Label(self._title_bar, text="",
+                                    font=("Segoe UI", 13, "bold"),
+                                    bg=CARD, fg=WHITE)
+        self._page_title.pack(side=tk.LEFT, padx=20, pady=12)
 
-        self.page_title_lbl = tk.Label(self.top_bar, text="Live Camera Recognition",
-                                       font=("Segoe UI", 13, "bold"), bg=self.bg_card, fg=self.text_title)
-        self.page_title_lbl.pack(side=tk.LEFT, pady=14)
+        self._fps_badge = tk.Label(self._title_bar, text="",
+                                   font=("Segoe UI", 9, "bold"),
+                                   bg=CARD, fg=SUCCESS_CLR)
+        self._fps_badge.pack(side=tk.RIGHT, padx=16)
 
-        # Top Badges on Right
-        badges_frame = tk.Frame(self.top_bar, bg=self.bg_card)
-        badges_frame.pack(side=tk.RIGHT, pady=12)
+        # Content switcher
+        self._content = tk.Frame(right, bg=BG)
+        self._content.pack(fill=tk.BOTH, expand=True, padx=16, pady=12)
 
-        self.badge_registered = tk.Label(badges_frame, text="Identities: 0", font=("Segoe UI", 9, "bold"),
-                                         bg=self.bg_accent, fg=self.cyan, padx=10, pady=4)
-        self.badge_registered.pack(side=tk.RIGHT, padx=6)
+        # Global status bar
+        bar = tk.Frame(right, bg=PANEL, height=26)
+        bar.pack(fill=tk.X, side=tk.BOTTOM)
+        bar.pack_propagate(False)
+        tk.Label(bar, textvariable=self.status_var,
+                 font=("Segoe UI", 8), bg=PANEL, fg=MUTED).pack(side=tk.LEFT, padx=12)
 
-        self.badge_fps = tk.Label(badges_frame, text="FPS: 0", font=("Segoe UI", 9, "bold"),
-                                  bg=self.bg_accent, fg=self.success, padx=10, pady=4)
-        self.badge_fps.pack(side=tk.RIGHT, padx=6)
+        # Build all pages
+        self._pages = {}
+        self._build_camera_page()
+        self._build_enroll_page()
+        self._build_inspect_page()
+        self._build_people_page()
+        self._build_attendance_page()
+        self._build_settings_page()
 
-        # Content Area where pages are switched
-        self.content_area = tk.Frame(self.main_wrapper, bg=self.bg_root, padx=18, pady=14)
-        self.content_area.pack(fill=tk.BOTH, expand=True)
+        self._active_page = None
+        self._show_camera()
 
-        # Bottom Global Status Bar
-        self.status_bar = tk.Frame(self.main_wrapper, bg=self.bg_sidebar, height=28, padx=18)
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-        self.status_bar.pack_propagate(False)
+    # ── Navigation helper ────────────────────────────────────────────
+    def _nav_click(self, key: str, cmd):
+        for k, b in self._nav_buttons.items():
+            b.config(bg=BTN_BLUE if k == key else PANEL,
+                     fg=WHITE if k == key else TEXT)
+        cmd()
 
-        self.status_lbl = tk.Label(self.status_bar, textvariable=self.status_var, font=("Segoe UI", 9),
-                                   bg=self.bg_sidebar, fg=self.text_muted)
-        self.status_lbl.pack(side=tk.LEFT)
+    def _switch_page(self, key: str, title: str):
+        if self._active_page:
+            self._active_page.pack_forget()
+        page = self._pages[key]
+        page.pack(fill=tk.BOTH, expand=True)
+        self._active_page = page
+        self._page_title.config(text=title)
 
-        # Initialize and build all pages
-        self.pages = {}
-        self._init_camera_page()
-        self._init_enroll_page()
-        self._init_inspect_page()
-        self._init_database_page()
-        self._init_attendance_page()
-        self._init_settings_page()
+    # ══════════════════════════════════════════════════════════════════
+    #  PAGE 1 — LIVE CAMERA
+    # ══════════════════════════════════════════════════════════════════
+    def _build_camera_page(self):
+        page = tk.Frame(self._content, bg=BG)
+        self._pages["camera"] = page
 
-        # Show initial page
-        self.show_camera_page()
+        # ── Video canvas (left, large) ────────────────────────────────
+        cam_frame = tk.Frame(page, bg="#000000",
+                             highlightbackground="#2a2a4a", highlightthickness=1)
+        cam_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 12))
 
-    def _set_active_nav(self, active_key: str, title: str):
-        self.page_title_lbl.config(text=title)
-        for key, btn in self.nav_buttons.items():
-            if key == active_key:
-                btn.config(bg=self.primary, fg="#ffffff")
-            else:
-                btn.config(bg=self.bg_sidebar, fg=self.text_muted)
+        self._video_canvas = tk.Canvas(cam_frame, bg="#0a0a14", highlightthickness=0)
+        self._video_canvas.pack(fill=tk.BOTH, expand=True)
 
-        # Hide current page and show new page
-        if self.active_page:
-            self.active_page.pack_forget()
-
-        page = self.pages.get(active_key)
-        if page:
-            page.pack(fill=tk.BOTH, expand=True)
-            self.active_page = page
-
-    # =========================================================================
-    # PAGE 1: LIVE CAMERA RECOGNITION
-    # =========================================================================
-    def _init_camera_page(self):
-        page = tk.Frame(self.content_area, bg=self.bg_root)
-        self.pages["camera"] = page
-
-        # Split: Left (Canvas) | Right (Action Panel)
-        left_box = tk.Frame(page, bg=self.bg_card, highlightbackground=self.border_color, highlightthickness=1)
-        left_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 14))
-
-        self.video_canvas = tk.Canvas(left_box, bg="#08090f", highlightthickness=0)
-        self.video_canvas.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
-
-        # Right Panel
-        right_panel = tk.Frame(page, bg=self.bg_card, width=300, padx=16, pady=16)
-        right_panel.pack(side=tk.RIGHT, fill=tk.Y)
-        right_panel.pack_propagate(False)
-
-        tk.Label(right_panel, text="Camera Controls", font=("Segoe UI", 11, "bold"),
-                 bg=self.bg_card, fg=self.text_title).pack(anchor="w", pady=(0, 10))
-
-        # Main Start / Stop Button
-        self.btn_toggle_cam = tk.Button(
-            right_panel,
-            text="▶  Start Camera",
-            font=("Segoe UI", 11, "bold"),
-            bg=self.success,
-            fg="#ffffff",
-            activebackground=self.success_hover,
-            activeforeground="#ffffff",
-            relief=tk.FLAT,
-            cursor="hand2",
-            pady=10,
-            command=self.toggle_camera
+        # Placeholder text on canvas
+        self._video_canvas.create_text(
+            300, 240,
+            text="📷  Camera is off\n\nPress  ▶ Start Camera  to begin",
+            font=("Segoe UI", 14), fill=MUTED, justify=tk.CENTER,
+            tags="placeholder"
         )
-        self.btn_toggle_cam.pack(fill=tk.X, pady=(0, 12))
 
-        # Device Selection
-        dev_frame = tk.Frame(right_panel, bg=self.bg_card)
-        dev_frame.pack(fill=tk.X, pady=(0, 12))
-        tk.Label(dev_frame, text="Video Device:", font=("Segoe UI", 9),
-                 bg=self.bg_card, fg=self.text_muted).pack(anchor="w", pady=(0, 3))
-        
-        self.cam_combo = ttk.Combobox(dev_frame, values=["Device 0 (Default Webcam)", "Device 1", "Device 2"], state="readonly")
-        self.cam_combo.current(0)
-        self.cam_combo.pack(fill=tk.X)
+        # ── Right control panel ───────────────────────────────────────
+        ctrl = tk.Frame(page, bg=PANEL, width=230, padx=16, pady=16)
+        ctrl.pack(side=tk.RIGHT, fill=tk.Y)
+        ctrl.pack_propagate(False)
 
-        # Auto-Log Attendance Checkbox
-        self.auto_log_var = tk.BooleanVar(value=True)
-        chk = tk.Checkbutton(
-            right_panel,
-            text="Auto-Log to Attendance CSV",
-            variable=self.auto_log_var,
-            font=("Segoe UI", 9),
-            bg=self.bg_card,
-            fg=self.text_main,
-            selectcolor=self.bg_card,
-            activebackground=self.bg_card,
-            activeforeground=self.text_main
-        )
-        chk.pack(anchor="w", pady=(0, 14))
+        _label(ctrl, "Camera Controls", 11, bold=True, color=WHITE).pack(anchor="w", pady=(0, 12))
 
-        # Live Feed Metrics Card
-        stat_card = tk.LabelFrame(right_panel, text="Live Telemetry", font=("Segoe UI", 9, "bold"),
-                                  bg=self.bg_accent, fg=self.cyan, padx=12, pady=10, relief=tk.FLAT)
-        stat_card.pack(fill=tk.X, pady=(0, 16))
+        # Big start / stop button
+        self._cam_btn = _btn(ctrl, "▶  Start Camera", BTN_GREEN, self._toggle_camera, pady=12)
+        self._cam_btn.pack(fill=tk.X, pady=(0, 10))
 
-        self.lbl_cam_fps = tk.Label(stat_card, text="Speed: 0 FPS", font=("Segoe UI", 9),
-                                    bg=self.bg_accent, fg=self.text_main)
-        self.lbl_cam_fps.pack(anchor="w")
+        # Camera selector
+        _label(ctrl, "Select Camera:", 9, color=MUTED).pack(anchor="w")
+        self._cam_combo = ttk.Combobox(ctrl,
+            values=["Camera 0  (default)", "Camera 1", "Camera 2"],
+            state="readonly", font=("Segoe UI", 9))
+        self._cam_combo.current(0)
+        self._cam_combo.pack(fill=tk.X, pady=(2, 12))
 
-        self.lbl_cam_faces = tk.Label(stat_card, text="Detected Faces: 0", font=("Segoe UI", 9),
-                                      bg=self.bg_accent, fg=self.text_main)
-        self.lbl_cam_faces.pack(anchor="w", pady=3)
+        # Auto-log checkbox
+        self._auto_log = tk.BooleanVar(value=True)
+        tk.Checkbutton(ctrl, text="Auto-save attendance log",
+                       variable=self._auto_log,
+                       font=("Segoe UI", 9), bg=PANEL, fg=TEXT,
+                       selectcolor=PANEL,
+                       activebackground=PANEL).pack(anchor="w", pady=(0, 14))
 
-        self.lbl_cam_last = tk.Label(stat_card, text="Last Verified: None", font=("Segoe UI", 9),
-                                     bg=self.bg_accent, fg=self.success)
-        self.lbl_cam_last.pack(anchor="w")
+        _sep(ctrl)
 
-        # Quick Enroll from Camera Feed
-        tk.Label(right_panel, text="Instant Enrollment", font=("Segoe UI", 10, "bold"),
-                 bg=self.bg_card, fg=self.text_title).pack(anchor="w", pady=(10, 4))
-        tk.Label(right_panel, text="Register the person currently standing in front of the camera:",
-                 font=("Segoe UI", 8), bg=self.bg_card, fg=self.text_muted, wraplength=260, justify="left").pack(anchor="w", pady=(0, 8))
+        # Live stats
+        _label(ctrl, "Live Stats", 10, bold=True, color=WHITE).pack(anchor="w", pady=(0, 8))
+        self._lbl_fps   = _label(ctrl, "Speed:  —", 9, color=TEXT)
+        self._lbl_faces = _label(ctrl, "Faces detected:  0", 9, color=TEXT)
+        self._lbl_last  = _label(ctrl, "Last recognized:  —", 9, color=SUCCESS_CLR)
+        self._lbl_fps.pack(anchor="w")
+        self._lbl_faces.pack(anchor="w", pady=4)
+        self._lbl_last.pack(anchor="w")
 
-        btn_quick = tk.Button(
-            right_panel,
-            text="⚡  Enroll Current Face",
-            font=("Segoe UI", 9, "bold"),
-            bg=self.primary,
-            fg="#ffffff",
-            activebackground=self.primary_hover,
-            activeforeground="#ffffff",
-            relief=tk.FLAT,
-            cursor="hand2",
-            pady=7,
-            command=self.open_quick_enroll_modal
-        )
-        btn_quick.pack(fill=tk.X)
+        _sep(ctrl)
 
-    def show_camera_page(self):
-        self._set_active_nav("camera", "Live Camera Recognition")
+        # Quick enroll from camera
+        _label(ctrl, "Enroll while camera is on", 10, bold=True, color=WHITE).pack(anchor="w", pady=(0, 6))
+        _label(ctrl, "Stand in front of the camera,\nthen press the button below.",
+               9, color=MUTED, justify="left", wraplength=190).pack(anchor="w", pady=(0, 8))
+        _btn(ctrl, "⚡  Enroll Current Face", BTN_BLUE, self._quick_enroll_modal).pack(fill=tk.X)
 
-    def toggle_camera(self):
+    def _show_camera(self):
+        self._switch_page("camera", "📹   Live Camera  —  Real-time Face Recognition")
+
+    def _toggle_camera(self):
         if self.is_camera_running:
-            self.stop_camera()
+            self._stop_camera()
         else:
-            self.start_camera()
+            self._start_camera()
 
-    def start_camera(self):
-        idx = self.cam_combo.current()
+    def _start_camera(self):
+        idx = self._cam_combo.current()
         self.cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
         if not self.cap.isOpened():
             self.cap = cv2.VideoCapture(idx)
-
         if not self.cap.isOpened():
-            messagebox.showerror("Camera Error", f"Unable to open camera device index {idx}.\nPlease verify your webcam connection.")
+            messagebox.showerror("Camera Not Found",
+                f"Could not open camera #{idx}.\n\n"
+                "Make sure your webcam is connected and not used by another app.")
             return
 
-        self.is_camera_running = True
-        self.btn_toggle_cam.config(text="⏹  Stop Camera", bg=self.danger, activebackground=self.danger_hover)
-        self.status_var.set(f"Camera active on device {idx}. Live detection running.")
-        self.last_fps_time = time.time()
-        self._camera_update_loop()
+        # Remove placeholder
+        self._video_canvas.delete("placeholder")
 
-    def stop_camera(self):
+        self.is_camera_running = True
+        self._cam_btn.config(text="⏹  Stop Camera", bg=BTN_RED,
+                              activebackground=BTN_RED)
+        self.last_fps_time = time.time()
+        self.status_var.set(f"✅  Camera #{idx} is running — recognizing faces in real time.")
+        self._camera_loop()
+
+    def _stop_camera(self):
         self.is_camera_running = False
         if self.cap:
             self.cap.release()
             self.cap = None
-        self.btn_toggle_cam.config(text="▶  Start Camera", bg=self.success, activebackground=self.success_hover)
+        self._cam_btn.config(text="▶  Start Camera", bg=BTN_GREEN,
+                              activebackground=BTN_GREEN)
+        self._lbl_fps.config(text="Speed:  —")
+        self._lbl_faces.config(text="Faces detected:  0")
+        self._fps_badge.config(text="")
         self.status_var.set("Camera stopped.")
-        self.lbl_cam_fps.config(text="Speed: 0 FPS")
-        self.lbl_cam_faces.config(text="Detected Faces: 0")
-        self.badge_fps.config(text="FPS: 0")
 
-    def _camera_update_loop(self):
+        # Restore placeholder
+        w = self._video_canvas.winfo_width() or 600
+        h = self._video_canvas.winfo_height() or 400
+        self._video_canvas.delete("all")
+        self._video_canvas.create_text(
+            w // 2, h // 2,
+            text="📷  Camera is off\n\nPress  ▶ Start Camera  to begin",
+            font=("Segoe UI", 14), fill=MUTED, justify=tk.CENTER,
+            tags="placeholder"
+        )
+
+    def _camera_loop(self):
         if not self.is_camera_running or self.cap is None:
             return
 
         ret, frame = self.cap.read()
         if ret and frame is not None:
-            # Mirror horizontally for natural view
             frame = cv2.flip(frame, 1)
 
-            # Measure real FPS
             now = time.time()
-            fps_val = 1.0 / max(1e-4, now - self.last_fps_time)
+            fps_raw = 1.0 / max(1e-4, now - self.last_fps_time)
             self.last_fps_time = now
-            self.fps = 0.9 * self.fps + 0.1 * fps_val if self.fps > 0 else fps_val
+            self.fps = 0.9 * self.fps + 0.1 * fps_raw if self.fps > 0 else fps_raw
 
-            # Run Face Recognition Pipeline
-            known_embeddings = self.database.embeddings
-            results = self.engine.process_frame(frame, known_embeddings, draw_annotations=True)
+            results = self.engine.process_frame(frame, self.database.embeddings, draw_annotations=True)
 
             fps_int = int(self.fps)
-            self.lbl_cam_fps.config(text=f"Speed: {fps_int} FPS")
-            self.lbl_cam_faces.config(text=f"Detected Faces: {len(results)}")
-            self.badge_fps.config(text=f"FPS: {fps_int}")
+            self._lbl_fps.config(text=f"Speed:  {fps_int} FPS")
+            self._lbl_faces.config(text=f"Faces detected:  {len(results)}")
+            self._fps_badge.config(text=f"⚡ {fps_int} FPS")
 
-            # Check for recognized faces and log attendance
             for r in results:
                 if r["is_known"]:
                     name = r["name"]
                     conf = r["confidence_pct"]
-                    self.lbl_cam_last.config(text=f"Last: {name} ({conf:.0f}%)")
-                    if self.auto_log_var.get():
+                    self._lbl_last.config(text=f"Last recognized:  {name}  ({conf:.0f}%)")
+                    if self._auto_log.get():
                         self.attendance.log(name, conf)
 
-            # Handle live enrollment capture if active
             if self.is_enrolling:
-                self._process_enrollment_frame(frame, results)
+                self._run_enrollment_frame(frame, results)
 
-            # Draw FPS badge on frame
-            cv2.putText(frame, f"{fps_int} FPS", (14, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(frame, f"{fps_int} FPS", (10, 26),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 180), 2, cv2.LINE_AA)
 
             self.current_frame = frame
-            self._render_frame(self.video_canvas, frame)
+            self._draw_frame(self._video_canvas, frame)
 
-        # Target ~30 FPS UI refresh
-        self.root.after(20, self._camera_update_loop)
+        self.root.after(20, self._camera_loop)
 
-    def _render_frame(self, canvas: tk.Canvas, bgr_frame: np.ndarray):
-        cw = canvas.winfo_width()
-        ch = canvas.winfo_height()
-        if cw < 50 or ch < 50:
-            cw, ch = 640, 480
-
-        h, w = bgr_frame.shape[:2]
-        ratio = min(cw / w, ch / h)
-        nw, nh = max(1, int(w * ratio)), max(1, int(h * ratio))
-
-        resized = cv2.resize(bgr_frame, (nw, nh), interpolation=cv2.INTER_LINEAR)
-        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+    def _draw_frame(self, canvas: tk.Canvas, bgr: np.ndarray):
+        cw = canvas.winfo_width() or 640
+        ch = canvas.winfo_height() or 480
+        h, w = bgr.shape[:2]
+        scale = min(cw / w, ch / h)
+        nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
+        rgb = cv2.cvtColor(cv2.resize(bgr, (nw, nh), interpolation=cv2.INTER_LINEAR),
+                           cv2.COLOR_BGR2RGB)
         img_tk = ImageTk.PhotoImage(image=Image.fromarray(rgb))
-
         canvas.delete("all")
         canvas.create_image(cw // 2, ch // 2, anchor=tk.CENTER, image=img_tk)
         canvas.image = img_tk
 
-    # =========================================================================
-    # PAGE 2: ENROLL PERSON
-    # =========================================================================
-    def _init_enroll_page(self):
-        page = tk.Frame(self.content_area, bg=self.bg_root)
-        self.pages["enroll"] = page
+    # ── Quick enroll from camera ──────────────────────────────────────
+    def _quick_enroll_modal(self):
+        modal = tk.Toplevel(self.root)
+        modal.title("Enroll Current Face")
+        modal.geometry("360x200")
+        modal.configure(bg=PANEL)
+        modal.transient(self.root)
+        modal.grab_set()
+        modal.resizable(False, False)
 
-        # Centered Card Container
-        card = tk.Frame(page, bg=self.bg_card, padx=32, pady=28,
-                        highlightbackground=self.border_color, highlightthickness=1)
-        card.pack(fill=tk.BOTH, expand=True)
+        _label(modal, "What is this person's name?", 11, bold=True, color=WHITE).pack(pady=(24, 8))
 
-        tk.Label(card, text="Register New Identity", font=("Segoe UI", 15, "bold"),
-                 bg=self.bg_card, fg=self.text_title).pack(anchor="w")
-        tk.Label(card, text="Provide the person's name and choose between live camera sampling or photo uploads.",
-                 font=("Segoe UI", 9), bg=self.bg_card, fg=self.text_muted).pack(anchor="w", pady=(2, 20))
+        entry = tk.Entry(modal, font=("Segoe UI", 12), bg="#0f3460", fg=WHITE,
+                         insertbackground=WHITE, relief=tk.FLAT, bd=8, justify="center")
+        entry.pack(fill=tk.X, padx=30, ipady=5)
+        entry.focus_set()
 
-        # Input Field: Name
-        name_box = tk.Frame(card, bg=self.bg_card)
-        name_box.pack(fill=tk.X, pady=(0, 24))
-        tk.Label(name_box, text="Full Name / Identifier:", font=("Segoe UI", 10, "bold"),
-                 bg=self.bg_card, fg=self.text_main).pack(anchor="w", pady=(0, 6))
+        def _confirm():
+            name = entry.get().strip()
+            if not name:
+                return
+            modal.destroy()
+            self._enroll_name_entry.delete(0, tk.END)
+            self._enroll_name_entry.insert(0, name)
+            self._start_live_enrollment()
 
-        self.enroll_name_entry = tk.Entry(name_box, font=("Segoe UI", 11), bg="#111420", fg="#ffffff",
-                                          insertbackground="#ffffff", relief=tk.FLAT, bd=8)
-        self.enroll_name_entry.pack(fill=tk.X, ipady=4)
+        entry.bind("<Return>", lambda e: _confirm())
+        _btn(modal, "✅  Start Capturing", BTN_GREEN, _confirm).pack(pady=16)
 
-        # Split Card for 2 Options
-        methods_frame = tk.Frame(card, bg=self.bg_card)
-        methods_frame.pack(fill=tk.BOTH, expand=True)
+    # ═══════════════════════════════════════════════════════════════════
+    #  PAGE 2 — ENROLL / ADD NEW PERSON
+    # ═══════════════════════════════════════════════════════════════════
+    def _build_enroll_page(self):
+        page = tk.Frame(self._content, bg=BG)
+        self._pages["enroll"] = page
 
-        # Option A: Live Camera Sampling
-        opt_cam = tk.LabelFrame(methods_frame, text="Method A: Live Webcam Sampling",
-                                font=("Segoe UI", 10, "bold"), bg=self.bg_accent, fg=self.cyan,
-                                padx=20, pady=18, relief=tk.FLAT)
-        opt_cam.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        # ── Header ────────────────────────────────────────────────────
+        hdr = tk.Frame(page, bg=CARD, padx=24, pady=20,
+                       highlightbackground="#2a2a4a", highlightthickness=1)
+        hdr.pack(fill=tk.X, pady=(0, 16))
 
-        tk.Label(opt_cam, text="Captures 5 consecutive frames from your live webcam. A multi-shot mean embedding will be computed for maximum accuracy across head angles.",
-                 font=("Segoe UI", 9), bg=self.bg_accent, fg=self.text_muted, wraplength=340, justify="left").pack(anchor="w", pady=(0, 16))
+        _label(hdr, "➕   Add a New Person", 14, bold=True, color=WHITE).pack(anchor="w")
+        _label(hdr, "Type their name, then choose how to add their photo.",
+               9, color=MUTED).pack(anchor="w", pady=(4, 0))
 
-        self.btn_start_sampling = tk.Button(
-            opt_cam,
-            text="📸  Start Live Sampling (5 Shots)",
-            font=("Segoe UI", 10, "bold"),
-            bg=self.primary,
-            fg="#ffffff",
-            activebackground=self.primary_hover,
-            activeforeground="#ffffff",
-            relief=tk.FLAT,
-            cursor="hand2",
-            pady=8,
-            command=self.start_live_enrollment
+        # ── Name input ────────────────────────────────────────────────
+        name_card = tk.Frame(page, bg=CARD, padx=24, pady=18,
+                             highlightbackground="#2a2a4a", highlightthickness=1)
+        name_card.pack(fill=tk.X, pady=(0, 16))
+
+        _label(name_card, "Step 1 — Enter the person's name:", 10, bold=True, color=WHITE).pack(anchor="w", pady=(0, 8))
+
+        self._enroll_name_entry = tk.Entry(
+            name_card, font=("Segoe UI", 13),
+            bg="#0f3460", fg=WHITE,
+            insertbackground=WHITE, relief=tk.FLAT, bd=10,
         )
-        self.btn_start_sampling.pack(fill=tk.X)
+        self._enroll_name_entry.pack(fill=tk.X, ipady=5)
+        _label(name_card, "Example: Ahmed Mohamed", 8, color=MUTED).pack(anchor="w", pady=(4, 0))
 
-        self.enroll_feedback_lbl = tk.Label(opt_cam, text="", font=("Segoe UI", 9, "bold"),
-                                            bg=self.bg_accent, fg=self.warning)
-        self.enroll_feedback_lbl.pack(pady=12)
+        # ── Two method cards ─────────────────────────────────────────
+        methods = tk.Frame(page, bg=BG)
+        methods.pack(fill=tk.BOTH, expand=True)
+        methods.columnconfigure(0, weight=1)
+        methods.columnconfigure(1, weight=1)
 
-        # Option B: Upload Images
-        opt_file = tk.LabelFrame(methods_frame, text="Method B: Select Existing Photos",
-                                 font=("Segoe UI", 10, "bold"), bg=self.bg_accent, fg=self.cyan,
-                                 padx=20, pady=18, relief=tk.FLAT)
-        opt_file.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
+        # Method A — Live camera
+        card_a = tk.Frame(methods, bg=CARD, padx=22, pady=20,
+                          highlightbackground="#2a2a4a", highlightthickness=1)
+        card_a.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
-        tk.Label(opt_file, text="Choose one or multiple clear portrait photos of this person from your computer (.jpg, .png).",
-                 font=("Segoe UI", 9), bg=self.bg_accent, fg=self.text_muted, wraplength=340, justify="left").pack(anchor="w", pady=(0, 16))
+        _label(card_a, "📸  Method A  —  Use Camera", 11, bold=True, color=WHITE).pack(anchor="w", pady=(0, 10))
+        _label(card_a,
+               "Stand in front of the webcam.\n"
+               "The app will take 5 quick photos of your face automatically.\n\n"
+               "Best for: accurate recognition in all lighting conditions.",
+               9, color=MUTED, justify="left", wraplength=320).pack(anchor="w", pady=(0, 16))
 
-        btn_pick_files = tk.Button(
-            opt_file,
-            text="📁  Browse Photos from Disk...",
-            font=("Segoe UI", 10, "bold"),
-            bg="#334155",
-            fg="#ffffff",
-            activebackground="#475569",
-            activeforeground="#ffffff",
-            relief=tk.FLAT,
-            cursor="hand2",
-            pady=8,
-            command=self.enroll_from_files
-        )
-        btn_pick_files.pack(fill=tk.X)
+        self._btn_live = _btn(card_a, "📸  Start Camera Capture", BTN_BLUE,
+                              self._start_live_enrollment, pady=10)
+        self._btn_live.pack(fill=tk.X)
 
-    def show_enroll_page(self):
-        self._set_active_nav("enroll", "Enroll New Identity")
+        self._enroll_status_lbl = _label(card_a, "", 9, color=WARN_CLR)
+        self._enroll_status_lbl.pack(pady=(10, 0))
 
-    def start_live_enrollment(self):
-        name = self.enroll_name_entry.get().strip()
+        # Method B — Upload photos
+        card_b = tk.Frame(methods, bg=CARD, padx=22, pady=20,
+                          highlightbackground="#2a2a4a", highlightthickness=1)
+        card_b.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+
+        _label(card_b, "📁  Method B  —  Upload Photos", 11, bold=True, color=WHITE).pack(anchor="w", pady=(0, 10))
+        _label(card_b,
+               "Select one or more clear portrait photos from your computer.\n\n"
+               "Accepted formats: JPG, PNG, WEBP, BMP\n\n"
+               "Best for: people who are not present right now.",
+               9, color=MUTED, justify="left", wraplength=320).pack(anchor="w", pady=(0, 16))
+
+        _btn(card_b, "📂  Choose Photos from Computer", BTN_GRAY,
+             self._enroll_from_files, pady=10).pack(fill=tk.X)
+
+    def _show_enroll(self):
+        self._switch_page("enroll", "➕   Add New Person")
+
+    def _start_live_enrollment(self):
+        name = self._enroll_name_entry.get().strip()
         if not name:
-            messagebox.showwarning("Name Required", "Please enter a valid person name first.")
+            messagebox.showwarning("Name Missing",
+                "Please type the person's name first (Step 1).")
             return
-
         if not self.is_camera_running:
-            self.start_camera()
-            self.show_camera_page()
+            self._start_camera()
+            self._show_camera()
+        self.is_enrolling     = True
+        self.enroll_name      = name
+        self.enroll_samples   = []
+        self.enroll_countdown = 18  # ~0.5 sec warm-up at 30fps
+        self._enroll_status_lbl.config(
+            text=f"Camera starting… Look straight at the lens.")
+        self.status_var.set(f"Getting ready to capture {name}'s face…")
 
-        self.is_enrolling = True
-        self.enroll_target_name = name
-        self.enroll_samples = []
-        self.enroll_countdown = 15
-        self.enroll_feedback_lbl.config(text=f"Preparing camera... Look straight at the lens.")
-        self.status_var.set(f"Sampling face for '{name}'... Stand still and slowly tilt head slightly.")
-
-    def _process_enrollment_frame(self, frame: np.ndarray, results: list):
+    def _run_enrollment_frame(self, frame, results):
         if self.enroll_countdown > 0:
             self.enroll_countdown -= 1
-            cv2.putText(frame, f"GET READY: {self.enroll_countdown // 3 + 1}", (frame.shape[1]//2 - 110, frame.shape[0]//2),
-                        cv2.FONT_HERSHEY_DUPLEX, 1.1, (0, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(frame, "GET READY...", (frame.shape[1] // 2 - 100, frame.shape[0] // 2),
+                        cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 220, 255), 2, cv2.LINE_AA)
             return
 
-        # Ensure only 1 face is present for high fidelity
         if len(results) == 1:
+            # ── Duplicate check — runs only on the very first sample ─────────
+            if len(self.enroll_samples) == 0:
+                face_emb = results[0].get("embedding")
+                if face_emb is not None:
+                    matched_name = self.database.find_matching_identity(face_emb)
+                    if matched_name is not None:
+                        # This face is already registered — reject enrollment
+                        self.is_enrolling = False
+                        self._enroll_status_lbl.config(
+                            text=f"⚠️  Already registered as '{matched_name}'")
+                        self.status_var.set(
+                            f"Enrollment stopped — face already registered as '{matched_name}'.")
+                        messagebox.showwarning(
+                            "Already Registered",
+                            f"This person is already in the system as:\n\n"
+                            f"       ➜  {matched_name}\n\n"
+                            "Enrollment has been cancelled.\n"
+                            "If you want to update their photos, please remove them first "
+                            "from the People List and re-enroll."
+                        )
+                        return
+
+            # ── Collect sample ────────────────────────────────────────────────
             self.enroll_samples.append(frame.copy())
             count = len(self.enroll_samples)
-            self.enroll_feedback_lbl.config(text=f"Captured {count}/{self.enroll_target_count} samples...")
-            self.status_var.set(f"Capturing samples: {count}/{self.enroll_target_count}")
+            self._enroll_status_lbl.config(text=f"📸  Captured {count} / {self.enroll_need} …")
+            cv2.putText(frame, f"Photo {count}/{self.enroll_need}",
+                        (20, 70), cv2.FONT_HERSHEY_DUPLEX, 0.9, (0, 255, 0), 2, cv2.LINE_AA)
 
-            cv2.putText(frame, f"CAPTURED {count}/{self.enroll_target_count}", (20, 80),
-                        cv2.FONT_HERSHEY_DUPLEX, 0.9, (0, 255, 0), 2, cv2.LINE_AA)
-
-            if count >= self.enroll_target_count:
+            if count >= self.enroll_need:
                 self.is_enrolling = False
-                success, msg = self.database.add_person_from_frames(self.enroll_target_name, self.enroll_samples)
-                self.enroll_feedback_lbl.config(text=msg)
+                ok, msg = self.database.add_person_from_frames(self.enroll_name, self.enroll_samples)
+                self._enroll_status_lbl.config(text=msg)
                 self.status_var.set(msg)
-                self._refresh_db_stats()
-                self._refresh_database_table()
-                messagebox.showinfo("Enrollment Complete", msg)
+                self._update_identity_count()
+                self._refresh_people_table()
+                if ok:
+                    messagebox.showinfo("✅  Person Added!",
+                        f"'{self.enroll_name}' has been successfully registered.\n\n"
+                        "They will now be recognized by the camera.")
+                else:
+                    messagebox.showerror("Enrollment Failed", msg)
         else:
-            cv2.putText(frame, "Ensure only 1 face is visible in front of camera", (25, 75),
-                        cv2.FONT_HERSHEY_DUPLEX, 0.65, (0, 0, 255), 2, cv2.LINE_AA)
+            cv2.putText(frame, "⚠ Only one face please", (20, 70),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.7, (0, 60, 255), 2, cv2.LINE_AA)
 
-    def enroll_from_files(self):
-        name = self.enroll_name_entry.get().strip()
+    def _enroll_from_files(self):
+        name = self._enroll_name_entry.get().strip()
         if not name:
-            messagebox.showwarning("Name Required", "Please enter a valid person name first.")
+            messagebox.showwarning("Name Missing",
+                "Please type the person's name first (Step 1).")
             return
-
         files = filedialog.askopenfilenames(
-            title=f"Select Photos for {name}",
-            filetypes=[("Image Files", "*.jpg *.jpeg *.png *.bmp *.webp"), ("All Files", "*.*")]
+            title=f"Select photos for  {name}",
+            filetypes=[("Image files", "*.jpg *.jpeg *.png *.bmp *.webp"), ("All files", "*.*")]
         )
         if not files:
             return
 
-        self.status_var.set(f"Extracting features from {len(files)} image(s)...")
+        # ── Duplicate check: scan the first photo before saving anything ──
+        self.status_var.set("Checking if this person is already registered…")
         self.root.update()
+        try:
+            import cv2, numpy as np
+            first_img = cv2.imdecode(np.fromfile(files[0], dtype=np.uint8), cv2.IMREAD_COLOR)
+            if first_img is not None:
+                faces = self.engine.detect_faces(first_img)
+                if faces is not None and len(faces) > 0:
+                    best_face = max(faces, key=lambda f: f[2] * f[3])
+                    emb = self.engine.extract_embedding(first_img, best_face)
+                    matched = self.database.find_matching_identity(emb)
+                    if matched is not None:
+                        messagebox.showwarning(
+                            "Already Registered",
+                            f"The face in the selected photo is already registered as:\n\n"
+                            f"       ➜  {matched}\n\n"
+                            "Enrollment has been cancelled.\n"
+                            "If you want to update their photos, remove them first "
+                            "from the People List and re-enroll."
+                        )
+                        self.status_var.set(
+                            f"Enrollment cancelled — face already registered as '{matched}'.")
+                        return
+        except Exception:
+            pass  # If check fails for any reason, let the normal flow continue
 
-        success, msg = self.database.add_person_from_images(name, list(files))
-        if success:
-            self._refresh_db_stats()
-            self._refresh_database_table()
-            messagebox.showinfo("Success", msg)
-            self.status_var.set(msg)
+        # ── No duplicate found — proceed with enrollment ───────────────
+        self.status_var.set(f"Processing {len(files)} photo(s) for {name}…")
+        self.root.update()
+        ok, msg = self.database.add_person_from_images(name, list(files))
+        self._update_identity_count()
+        self._refresh_people_table()
+        if ok:
+            messagebox.showinfo("✅  Person Added!", msg)
         else:
-            messagebox.showerror("Enrollment Error", msg)
-            self.status_var.set(msg)
+            messagebox.showerror("Could not add person", msg)
+        self.status_var.set(msg)
 
-    def open_quick_enroll_modal(self):
-        modal = tk.Toplevel(self.root)
-        modal.title("Quick Enroll")
-        modal.geometry("380x180")
-        modal.configure(bg=self.bg_card)
-        modal.transient(self.root)
-        modal.grab_set()
+    # ═══════════════════════════════════════════════════════════════════
+    #  PAGE 3 — ANALYZE A PHOTO
+    # ═══════════════════════════════════════════════════════════════════
+    def _build_inspect_page(self):
+        page = tk.Frame(self._content, bg=BG)
+        self._pages["inspect"] = page
 
-        tk.Label(modal, text="Enter Person's Name:", font=("Segoe UI", 10, "bold"),
-                 bg=self.bg_card, fg=self.text_title).pack(pady=(22, 6))
+        # Left — image preview
+        left = tk.Frame(page, bg="#000000",
+                        highlightbackground="#2a2a4a", highlightthickness=1)
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 12))
 
-        entry = tk.Entry(modal, font=("Segoe UI", 11), bg="#111420", fg="#ffffff",
-                         insertbackground="#ffffff", relief=tk.FLAT, bd=6)
-        entry.pack(fill=tk.X, padx=30, ipady=3)
-        entry.focus_set()
-
-        def confirm():
-            val = entry.get().strip()
-            if val:
-                self.enroll_name_entry.delete(0, tk.END)
-                self.enroll_name_entry.insert(0, val)
-                modal.destroy()
-                self.start_live_enrollment()
-
-        tk.Button(modal, text="Confirm & Capture", font=("Segoe UI", 10, "bold"),
-                  bg=self.primary, fg="#ffffff", relief=tk.FLAT, pady=6, cursor="hand2",
-                  command=confirm).pack(pady=16)
-
-    # =========================================================================
-    # PAGE 3: INSPECT IMAGE
-    # =========================================================================
-    def _init_inspect_page(self):
-        page = tk.Frame(self.content_area, bg=self.bg_root)
-        self.pages["inspect"] = page
-
-        left_box = tk.Frame(page, bg=self.bg_card, highlightbackground=self.border_color, highlightthickness=1)
-        left_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 14))
-
-        self.inspect_canvas = tk.Canvas(left_box, bg="#08090f", highlightthickness=0)
-        self.inspect_canvas.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
-
-        # Right Inspector Sidebar
-        sidebar = tk.Frame(page, bg=self.bg_card, width=300, padx=16, pady=16)
-        sidebar.pack(side=tk.RIGHT, fill=tk.Y)
-        sidebar.pack_propagate(False)
-
-        tk.Label(sidebar, text="Image Analysis", font=("Segoe UI", 11, "bold"),
-                 bg=self.bg_card, fg=self.text_title).pack(anchor="w", pady=(0, 10))
-
-        btn_browse = tk.Button(
-            sidebar,
-            text="📁  Browse Image...",
-            font=("Segoe UI", 10, "bold"),
-            bg=self.primary,
-            fg="#ffffff",
-            activebackground=self.primary_hover,
-            activeforeground="#ffffff",
-            relief=tk.FLAT,
-            cursor="hand2",
-            pady=8,
-            command=self.inspect_image_file
+        self._inspect_canvas = tk.Canvas(left, bg="#0a0a14", highlightthickness=0)
+        self._inspect_canvas.pack(fill=tk.BOTH, expand=True)
+        self._inspect_canvas.create_text(
+            300, 220,
+            text="🖼️  No photo selected yet\n\nPress  📂 Open Photo  to get started",
+            font=("Segoe UI", 13), fill=MUTED, justify=tk.CENTER,
+            tags="placeholder"
         )
-        btn_browse.pack(fill=tk.X, pady=(0, 8))
 
-        self.btn_export_annotated = tk.Button(
-            sidebar,
-            text="💾  Export Annotated Image",
-            font=("Segoe UI", 9),
-            bg="#334155",
-            fg="#ffffff",
-            relief=tk.FLAT,
-            cursor="hand2",
-            state=tk.DISABLED,
-            pady=6,
-            command=self.export_annotated_image
+        # Right — results
+        right = tk.Frame(page, bg=PANEL, width=250, padx=16, pady=16)
+        right.pack(side=tk.RIGHT, fill=tk.Y)
+        right.pack_propagate(False)
+
+        _label(right, "Photo Analysis", 11, bold=True, color=WHITE).pack(anchor="w", pady=(0, 12))
+        _btn(right, "📂  Open Photo", BTN_BLUE, self._inspect_file, pady=9).pack(fill=tk.X, pady=(0, 8))
+
+        self._btn_export = _btn(right, "💾  Save Annotated Copy", BTN_GRAY,
+                                self._export_annotated, pady=7)
+        self._btn_export.config(state=tk.DISABLED)
+        self._btn_export.pack(fill=tk.X, pady=(0, 16))
+
+        _sep(right)
+        _label(right, "Results:", 10, bold=True, color=WHITE).pack(anchor="w", pady=(0, 6))
+
+        self._inspect_text = tk.Text(right, bg=CARD, fg=TEXT, font=("Segoe UI", 9),
+                                     wrap=tk.WORD, relief=tk.FLAT, padx=10, pady=10, height=18)
+        self._inspect_text.pack(fill=tk.BOTH, expand=True)
+        self._inspect_text.insert("1.0", "Results will appear here after you open a photo.")
+        self._inspect_text.config(state=tk.DISABLED)
+
+        self._last_annotated = None
+
+    def _show_inspect(self):
+        self._switch_page("inspect", "🔍   Analyze a Photo  —  Find Faces in any Image")
+
+    def _inspect_file(self):
+        path = filedialog.askopenfilename(
+            title="Select a photo to analyze",
+            filetypes=[("Image files", "*.jpg *.jpeg *.png *.bmp *.webp")]
         )
-        self.btn_export_annotated.pack(fill=tk.X, pady=(0, 16))
-
-        tk.Label(sidebar, text="Detections & Matches:", font=("Segoe UI", 10, "bold"),
-                 bg=self.bg_card, fg=self.text_title).pack(anchor="w", pady=(0, 6))
-
-        self.txt_inspect_report = tk.Text(sidebar, bg=self.bg_accent, fg=self.text_main,
-                                          font=("Segoe UI", 9), wrap=tk.WORD, height=16,
-                                          relief=tk.FLAT, padx=10, pady=10)
-        self.txt_inspect_report.pack(fill=tk.BOTH, expand=True)
-
-        self.last_inspected_image = None
-
-    def show_inspect_page(self):
-        self._set_active_nav("inspect", "Inspect Image File")
-
-    def inspect_image_file(self):
-        file_path = filedialog.askopenfilename(
-            title="Select Image to Analyze",
-            filetypes=[("Image Files", "*.jpg *.jpeg *.png *.bmp *.webp")]
-        )
-        if not file_path:
+        if not path:
             return
-
-        img = cv2.imdecode(np.fromfile(file_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
         if img is None:
-            messagebox.showerror("Error", "Could not load selected image.")
+            messagebox.showerror("Error", "Could not read the selected file.")
             return
 
-        display_img = img.copy()
-        results = self.engine.process_frame(display_img, self.database.embeddings, draw_annotations=True)
+        display = img.copy()
+        results = self.engine.process_frame(display, self.database.embeddings, draw_annotations=True)
+        self._last_annotated = display
+        self._btn_export.config(state=tk.NORMAL)
 
-        self.last_inspected_image = display_img
-        self.btn_export_annotated.config(state=tk.NORMAL)
+        self._inspect_canvas.delete("all")
+        self._draw_frame(self._inspect_canvas, display)
 
-        # Render preview
-        self._render_frame(self.inspect_canvas, display_img)
-
-        # Update text breakdown
-        self.txt_inspect_report.delete("1.0", tk.END)
-        self.txt_inspect_report.insert(tk.END, f"File: {Path(file_path).name}\n")
-        self.txt_inspect_report.insert(tk.END, f"Total Faces Found: {len(results)}\n\n")
-
+        # Build readable report
+        lines = []
+        lines.append(f"📄  File: {Path(path).name}\n")
+        lines.append(f"👤  Faces found: {len(results)}\n")
+        lines.append("─" * 28 + "\n")
         if results:
-            for i, r in enumerate(results, start=1):
-                name = r["name"]
-                conf = r["confidence_pct"]
-                status = "VERIFIED" if r["is_known"] else "UNKNOWN"
-                self.txt_inspect_report.insert(tk.END, f"Face #{i}:\n")
-                self.txt_inspect_report.insert(tk.END, f" • Identity: {name}\n")
-                self.txt_inspect_report.insert(tk.END, f" • Confidence: {conf:.1f}%\n")
-                self.txt_inspect_report.insert(tk.END, f" • Status: {status}\n\n")
+            for i, r in enumerate(results, 1):
+                status = "✅ Recognized" if r["is_known"] else "❓ Unknown"
+                lines.append(f"Face #{i}\n")
+                lines.append(f"  Name:       {r['name']}\n")
+                lines.append(f"  Confidence: {r['confidence_pct']:.1f}%\n")
+                lines.append(f"  Status:     {status}\n\n")
         else:
-            self.txt_inspect_report.insert(tk.END, "No faces detected in this image.")
+            lines.append("No faces were detected in this photo.\n\n"
+                         "Try a clearer, well-lit portrait image.")
 
-    def export_annotated_image(self):
-        if self.last_inspected_image is None:
+        self._inspect_text.config(state=tk.NORMAL)
+        self._inspect_text.delete("1.0", tk.END)
+        self._inspect_text.insert("1.0", "".join(lines))
+        self._inspect_text.config(state=tk.DISABLED)
+
+    def _export_annotated(self):
+        if self._last_annotated is None:
             return
         dest = filedialog.asksaveasfilename(
             defaultextension=".jpg",
-            filetypes=[("JPEG Image", "*.jpg"), ("PNG Image", "*.png")]
+            filetypes=[("JPEG", "*.jpg"), ("PNG", "*.png")]
         )
         if dest:
-            _, buf = cv2.imencode(Path(dest).suffix or ".jpg", self.last_inspected_image)
+            ext = Path(dest).suffix or ".jpg"
+            _, buf = cv2.imencode(ext, self._last_annotated)
             buf.tofile(dest)
-            messagebox.showinfo("Export Successful", f"Saved annotated image to:\n{dest}")
+            messagebox.showinfo("Saved!", f"Annotated photo saved to:\n{dest}")
 
-    # =========================================================================
-    # PAGE 4: DATABASE MANAGER
-    # =========================================================================
-    def _init_database_page(self):
-        page = tk.Frame(self.content_area, bg=self.bg_root)
-        self.pages["database"] = page
+    # ═══════════════════════════════════════════════════════════════════
+    #  PAGE 4 — PEOPLE LIST
+    # ═══════════════════════════════════════════════════════════════════
+    def _build_people_page(self):
+        page = tk.Frame(self._content, bg=BG)
+        self._pages["people"] = page
 
-        # Action Bar
-        top_bar = tk.Frame(page, bg=self.bg_root)
-        top_bar.pack(fill=tk.X, pady=(0, 10))
+        # Top bar
+        top = tk.Frame(page, bg=BG)
+        top.pack(fill=tk.X, pady=(0, 10))
 
-        tk.Label(top_bar, text="Registered Identities", font=("Segoe UI", 12, "bold"),
-                 bg=self.bg_root, fg=self.text_title).pack(side=tk.LEFT)
+        _label(top, "Registered People", 12, bold=True, color=WHITE).pack(side=tk.LEFT)
 
-        btn_rebuild = tk.Button(top_bar, text="🔄  Re-index Database", font=("Segoe UI", 9),
-                                bg="#334155", fg="#ffffff", relief=tk.FLAT, cursor="hand2",
-                                command=self.rebuild_database)
-        btn_rebuild.pack(side=tk.RIGHT, padx=5)
+        _btn(top, "🗑️  Remove Selected", BTN_RED,
+             self._delete_person, pady=5).pack(side=tk.RIGHT, padx=4)
+        _btn(top, "📂  Open Faces Folder", BTN_GRAY,
+             self._open_faces_folder, pady=5).pack(side=tk.RIGHT, padx=4)
+        _btn(top, "🔄  Refresh List", BTN_GRAY,
+             self._refresh_people_table, pady=5).pack(side=tk.RIGHT, padx=4)
 
-        btn_open_folder = tk.Button(top_bar, text="📂  Open Faces Folder", font=("Segoe UI", 9),
-                                    bg="#334155", fg="#ffffff", relief=tk.FLAT, cursor="hand2",
-                                    command=self.open_faces_folder)
-        btn_open_folder.pack(side=tk.RIGHT, padx=5)
-
-        btn_delete = tk.Button(top_bar, text="🗑️  Delete Selected", font=("Segoe UI", 9, "bold"),
-                               bg=self.danger, fg="#ffffff", relief=tk.FLAT, cursor="hand2",
-                               command=self.delete_selected_person)
-        btn_delete.pack(side=tk.RIGHT, padx=5)
+        # Helper text
+        _label(page, "These are all the people the system currently knows and can recognize.",
+               9, color=MUTED).pack(anchor="w", pady=(0, 8))
 
         # Table
-        cols = ("name", "photos", "status", "folder")
-        self.tree_db = ttk.Treeview(page, columns=cols, show="headings", selectmode="browse")
-        self.tree_db.heading("name", text="Person Name")
-        self.tree_db.heading("photos", text="Photos Count")
-        self.tree_db.heading("status", text="Embedding Cache")
-        self.tree_db.heading("folder", text="Directory Path")
+        style = ttk.Style()
+        style.configure("People.Treeview",
+                         background=CARD, foreground=TEXT,
+                         fieldbackground=CARD, rowheight=34,
+                         font=("Segoe UI", 10))
+        style.configure("People.Treeview.Heading",
+                         background=PANEL, foreground=WHITE,
+                         font=("Segoe UI", 10, "bold"), relief="flat")
+        style.map("People.Treeview",
+                  background=[("selected", BTN_BLUE)],
+                  foreground=[("selected", WHITE)])
 
-        self.tree_db.column("name", width=200)
-        self.tree_db.column("photos", width=120, anchor="center")
-        self.tree_db.column("status", width=160, anchor="center")
-        self.tree_db.column("folder", width=420)
+        cols = ("name", "photos", "status")
+        self._people_tree = ttk.Treeview(page, columns=cols, show="headings",
+                                          selectmode="browse", style="People.Treeview")
+        self._people_tree.heading("name",   text="  Name")
+        self._people_tree.heading("photos", text="Photos")
+        self._people_tree.heading("status", text="Recognition Status")
+        self._people_tree.column("name",   width=280, anchor="w")
+        self._people_tree.column("photos", width=100, anchor="center")
+        self._people_tree.column("status", width=200, anchor="center")
 
-        sb = ttk.Scrollbar(page, orient=tk.VERTICAL, command=self.tree_db.yview)
-        self.tree_db.configure(yscroll=sb.set)
-
-        self.tree_db.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb = ttk.Scrollbar(page, orient=tk.VERTICAL, command=self._people_tree.yview)
+        self._people_tree.configure(yscroll=sb.set)
+        self._people_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self._refresh_database_table()
+        self._refresh_people_table()
 
-    def show_database_page(self):
-        self._set_active_nav("database", "Identities Database")
-        self._refresh_database_table()
+    def _show_people(self):
+        self._switch_page("people", "👥   People List  —  Everyone the System Knows")
+        self._refresh_people_table()
 
-    def _refresh_database_table(self):
-        for item in self.tree_db.get_children():
-            self.tree_db.delete(item)
+    def _refresh_people_table(self):
+        for item in self._people_tree.get_children():
+            self._people_tree.delete(item)
+        for p in self.database.list_people():
+            status = "✅ Active" if p["is_active"] else "⚠️ Needs refresh"
+            self._people_tree.insert("", tk.END,
+                values=(f"  {p['name']}", p["photo_count"], status))
 
-        people = self.database.list_people()
-        for p in people:
-            status = "Active (Computed)" if p["is_active"] else "Missing"
-            self.tree_db.insert("", tk.END, values=(p["name"], p["photo_count"], status, p["folder"]))
-
-    def _refresh_db_stats(self):
+    def _update_identity_count(self):
         count = len(self.database.embeddings)
-        self.badge_registered.config(text=f"Identities: {count}")
+        self._id_count_lbl.config(text=f"People registered: {count}")
 
-    def rebuild_database(self):
-        self.status_var.set("Re-indexing database embeddings...")
-        self.root.update()
-        self.database.rebuild_all()
-        self._refresh_db_stats()
-        self._refresh_database_table()
-        self.status_var.set("Database re-indexed successfully.")
-        messagebox.showinfo("Done", "All face embeddings recomputed successfully.")
+    def _delete_person(self):
+        sel = self._people_tree.selection()
+        if not sel:
+            messagebox.showwarning("Nothing Selected",
+                "Please click on a person's name first.")
+            return
+        name = self._people_tree.item(sel[0])["values"][0].strip()
+        if messagebox.askyesno("Remove Person",
+            f"Remove  '{name}'  from the system?\n\n"
+            "This will delete all their photos and recognition data."):
+            self.database.delete_person(name)
+            self._refresh_people_table()
+            self._update_identity_count()
+            messagebox.showinfo("Removed", f"'{name}' has been removed.")
 
-    def open_faces_folder(self):
+    def _open_faces_folder(self):
         folder = str(self.database.faces_dir)
-        if os.name == 'nt':
+        if os.name == "nt":
             os.startfile(folder)
         else:
             subprocess.run(["xdg-open", folder])
 
-    def delete_selected_person(self):
-        sel = self.tree_db.selection()
-        if not sel:
-            messagebox.showwarning("Selection Required", "Please select an identity from the table.")
-            return
+    # ═══════════════════════════════════════════════════════════════════
+    #  PAGE 5 — ATTENDANCE LOG
+    # ═══════════════════════════════════════════════════════════════════
+    def _build_attendance_page(self):
+        page = tk.Frame(self._content, bg=BG)
+        self._pages["attendance"] = page
 
-        item = self.tree_db.item(sel[0])
-        name = item["values"][0]
-        if messagebox.askyesno("Confirm Deletion", f"Permanently delete '{name}' and all associated photos?"):
-            self.database.delete_person(name)
-            self._refresh_db_stats()
-            self._refresh_database_table()
-            messagebox.showinfo("Deleted", f"'{name}' removed from database.")
+        # Top bar
+        top = tk.Frame(page, bg=BG)
+        top.pack(fill=tk.X, pady=(0, 10))
 
-    # =========================================================================
-    # PAGE 5: ATTENDANCE LOGS
-    # =========================================================================
-    def _init_attendance_page(self):
-        page = tk.Frame(self.content_area, bg=self.bg_root)
-        self.pages["attendance"] = page
+        _label(top, "Attendance Log", 12, bold=True, color=WHITE).pack(side=tk.LEFT)
 
-        top_bar = tk.Frame(page, bg=self.bg_root)
-        top_bar.pack(fill=tk.X, pady=(0, 10))
+        _btn(top, "📊  Open in Excel", BTN_GREEN,
+             self._open_csv, pady=5).pack(side=tk.RIGHT, padx=4)
+        _btn(top, "🔄  Refresh", BTN_GRAY,
+             self._refresh_attendance, pady=5).pack(side=tk.RIGHT, padx=4)
 
-        tk.Label(top_bar, text="Verified Attendance Logs", font=("Segoe UI", 12, "bold"),
-                 bg=self.bg_root, fg=self.text_title).pack(side=tk.LEFT)
+        _label(page,
+               "Every time someone is recognized by the camera, it is automatically recorded here.",
+               9, color=MUTED).pack(anchor="w", pady=(0, 8))
 
-        btn_refresh = tk.Button(top_bar, text="🔄  Refresh Logs", font=("Segoe UI", 9),
-                                bg="#334155", fg="#ffffff", relief=tk.FLAT, cursor="hand2",
-                                command=self._refresh_attendance_table)
-        btn_refresh.pack(side=tk.RIGHT, padx=5)
-
-        btn_open_csv = tk.Button(top_bar, text="📊  Open in Excel / CSV", font=("Segoe UI", 9, "bold"),
-                                 bg=self.success, fg="#ffffff", relief=tk.FLAT, cursor="hand2",
-                                 command=self.open_attendance_csv)
-        btn_open_csv.pack(side=tk.RIGHT, padx=5)
+        # Table
+        style = ttk.Style()
+        style.configure("Att.Treeview",
+                         background=CARD, foreground=TEXT,
+                         fieldbackground=CARD, rowheight=32,
+                         font=("Segoe UI", 10))
+        style.configure("Att.Treeview.Heading",
+                         background=PANEL, foreground=WHITE,
+                         font=("Segoe UI", 10, "bold"), relief="flat")
+        style.map("Att.Treeview",
+                  background=[("selected", BTN_BLUE)],
+                  foreground=[("selected", WHITE)])
 
         cols = ("date", "time", "name", "confidence", "status")
-        self.tree_attendance = ttk.Treeview(page, columns=cols, show="headings")
-        self.tree_attendance.heading("date", text="Date")
-        self.tree_attendance.heading("time", text="Time")
-        self.tree_attendance.heading("name", text="Person Name")
-        self.tree_attendance.heading("confidence", text="Confidence (%)")
-        self.tree_attendance.heading("status", text="Verification Status")
+        self._att_tree = ttk.Treeview(page, columns=cols, show="headings",
+                                       style="Att.Treeview")
+        self._att_tree.heading("date",       text="Date")
+        self._att_tree.heading("time",       text="Time")
+        self._att_tree.heading("name",       text="Person")
+        self._att_tree.heading("confidence", text="Confidence")
+        self._att_tree.heading("status",     text="Status")
+        self._att_tree.column("date",       width=110, anchor="center")
+        self._att_tree.column("time",       width=110, anchor="center")
+        self._att_tree.column("name",       width=230)
+        self._att_tree.column("confidence", width=120, anchor="center")
+        self._att_tree.column("status",     width=130, anchor="center")
 
-        self.tree_attendance.column("date", width=120, anchor="center")
-        self.tree_attendance.column("time", width=120, anchor="center")
-        self.tree_attendance.column("name", width=220)
-        self.tree_attendance.column("confidence", width=140, anchor="center")
-        self.tree_attendance.column("status", width=140, anchor="center")
-
-        sb = ttk.Scrollbar(page, orient=tk.VERTICAL, command=self.tree_attendance.yview)
-        self.tree_attendance.configure(yscroll=sb.set)
-
-        self.tree_attendance.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb = ttk.Scrollbar(page, orient=tk.VERTICAL, command=self._att_tree.yview)
+        self._att_tree.configure(yscroll=sb.set)
+        self._att_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self._refresh_attendance_table()
+        self._refresh_attendance()
 
-    def show_attendance_page(self):
-        self._set_active_nav("attendance", "Attendance Logs")
-        self._refresh_attendance_table()
+    def _show_attendance(self):
+        self._switch_page("attendance", "📋   Attendance Log  —  Who Was Recognized & When")
+        self._refresh_attendance()
 
-    def _refresh_attendance_table(self):
-        for item in self.tree_attendance.get_children():
-            self.tree_attendance.delete(item)
-
-        records = self.attendance.get_recent_records(limit=100)
-        for r in records:
+    def _refresh_attendance(self):
+        for item in self._att_tree.get_children():
+            self._att_tree.delete(item)
+        for r in self.attendance.get_recent_records(limit=200):
             if len(r) >= 5:
-                self.tree_attendance.insert("", tk.END, values=(r[0], r[1], r[2], r[3], r[4]))
+                self._att_tree.insert("", tk.END, values=r[:5])
 
-    def open_attendance_csv(self):
+    def _open_csv(self):
         f = str(self.attendance.log_file)
-        if os.name == 'nt':
+        if os.name == "nt":
             os.startfile(f)
         else:
             subprocess.run(["xdg-open", f])
 
-    # =========================================================================
-    # PAGE 6: TUNING & SETTINGS
-    # =========================================================================
-    def _init_settings_page(self):
-        page = tk.Frame(self.content_area, bg=self.bg_root)
-        self.pages["settings"] = page
+    # ═══════════════════════════════════════════════════════════════════
+    #  PAGE 6 — SETTINGS
+    # ═══════════════════════════════════════════════════════════════════
+    def _build_settings_page(self):
+        page = tk.Frame(self._content, bg=BG)
+        self._pages["settings"] = page
 
-        card = tk.Frame(page, bg=self.bg_card, padx=32, pady=28,
-                        highlightbackground=self.border_color, highlightthickness=1)
+        card = tk.Frame(page, bg=CARD, padx=30, pady=26,
+                        highlightbackground="#2a2a4a", highlightthickness=1)
         card.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(card, text="Threshold & Algorithm Tuning", font=("Segoe UI", 15, "bold"),
-                 bg=self.bg_card, fg=self.text_title).pack(anchor="w")
-        tk.Label(card, text="Fine-tune deep learning confidence levels for detection and identity matching in real-time.",
-                 font=("Segoe UI", 9), bg=self.bg_card, fg=self.text_muted).pack(anchor="w", pady=(2, 24))
+        _label(card, "⚙️   Settings", 14, bold=True, color=WHITE).pack(anchor="w")
+        _label(card, "Adjust how sensitive the recognition is. Most users can leave these at the defaults.",
+               9, color=MUTED).pack(anchor="w", pady=(4, 20))
 
-        # Slider 1: Match Threshold (Cosine similarity)
-        tk.Label(card, text="Match Similarity Threshold (Cosine):", font=("Segoe UI", 10, "bold"),
-                 bg=self.bg_card, fg=self.text_main).pack(anchor="w")
-        tk.Label(card, text="Default: 0.38 (Higher = stricter recognition, Lower = more lenient)",
-                 font=("Segoe UI", 8), bg=self.bg_card, fg=self.text_dim).pack(anchor="w", pady=(0, 6))
+        # ── Slider helper ─────────────────────────────────────────────
+        def slider_section(parent, title, hint, from_, to_, default, on_change):
+            tk.Frame(parent, bg="#2a2a4a", height=1).pack(fill=tk.X, pady=(0, 14))
+            row = tk.Frame(parent, bg=CARD)
+            row.pack(fill=tk.X, pady=(0, 4))
+            _label(row, title, 10, bold=True, color=WHITE).pack(side=tk.LEFT, anchor="w")
+            val_lbl = _label(row, f"{default}", 10, bold=True, color=ACCENT)
+            val_lbl.pack(side=tk.RIGHT)
+            _label(parent, hint, 8, color=MUTED).pack(anchor="w", pady=(0, 6))
+            sl = ttk.Scale(parent, from_=from_, to=to_, value=default,
+                           command=lambda v, lbl=val_lbl: on_change(v, lbl))
+            sl.pack(fill=tk.X, pady=(0, 16))
+            return sl
 
-        self.cosine_val_lbl = tk.Label(card, text=f"{self.engine.cosine_thresh:.2f}", font=("Segoe UI", 10, "bold"),
-                                       bg=self.bg_card, fg=self.cyan)
-        self.cosine_slider = ttk.Scale(card, from_=0.20, to=0.70, value=self.engine.cosine_thresh,
-                                       command=self._on_cosine_slider_change)
-        self.cosine_slider.pack(fill=tk.X, pady=(0, 4))
-        self.cosine_val_lbl.pack(anchor="e", pady=(0, 20))
+        # Cosine threshold
+        def _on_cosine(v, lbl):
+            f = float(v)
+            self.engine.set_cosine_threshold(f)
+            lbl.config(text=f"{f:.2f}")
 
-        # Slider 2: Detection Confidence
-        tk.Label(card, text="Face Detection Confidence (YuNet):", font=("Segoe UI", 10, "bold"),
-                 bg=self.bg_card, fg=self.text_main).pack(anchor="w")
-        tk.Label(card, text="Default: 0.75 (Higher = eliminates false positive face boxes)",
-                 font=("Segoe UI", 8), bg=self.bg_card, fg=self.text_dim).pack(anchor="w", pady=(0, 6))
+        slider_section(
+            card,
+            "Recognition Sensitivity",
+            "Default: 0.38  |  Lower = recognizes more easily (may confuse similar faces)  |  Higher = stricter match",
+            0.20, 0.70, self.engine.cosine_thresh, _on_cosine
+        )
 
-        self.det_val_lbl = tk.Label(card, text=f"{self.engine.score_thresh:.2f}", font=("Segoe UI", 10, "bold"),
-                                    bg=self.bg_card, fg=self.cyan)
-        self.det_slider = ttk.Scale(card, from_=0.40, to=0.95, value=self.engine.score_thresh,
-                                    command=self._on_detector_slider_change)
-        self.det_slider.pack(fill=tk.X, pady=(0, 4))
-        self.det_val_lbl.pack(anchor="e", pady=(0, 20))
+        # Detection threshold
+        def _on_detect(v, lbl):
+            f = float(v)
+            self.engine.set_detector_threshold(f)
+            lbl.config(text=f"{f:.2f}")
 
-        # Cooldown setting
-        tk.Label(card, text="Attendance Log Cooldown (Seconds):", font=("Segoe UI", 10, "bold"),
-                 bg=self.bg_card, fg=self.text_main).pack(anchor="w")
-        tk.Label(card, text="Prevents logging the same verified person more than once per time window.",
-                 font=("Segoe UI", 8), bg=self.bg_card, fg=self.text_dim).pack(anchor="w", pady=(0, 6))
+        slider_section(
+            card,
+            "Face Detection Confidence",
+            "Default: 0.75  |  Lower = detects more faces  |  Higher = only detects clearly visible faces",
+            0.40, 0.95, self.engine.score_thresh, _on_detect
+        )
 
-        self.cooldown_val_lbl = tk.Label(card, text=f"{self.attendance.cooldown_seconds}s", font=("Segoe UI", 10, "bold"),
-                                         bg=self.bg_card, fg=self.cyan)
-        self.cooldown_slider = ttk.Scale(card, from_=10, to=300, value=self.attendance.cooldown_seconds,
-                                         command=self._on_cooldown_slider_change)
-        self.cooldown_slider.pack(fill=tk.X, pady=(0, 4))
-        self.cooldown_val_lbl.pack(anchor="e", pady=(0, 20))
+        # Attendance cooldown
+        def _on_cool(v, lbl):
+            i = int(float(v))
+            self.attendance.cooldown_seconds = i
+            lbl.config(text=f"{i}s")
 
-    def show_settings_page(self):
-        self._set_active_nav("settings", "Algorithm Tuning")
+        slider_section(
+            card,
+            "Attendance Log Cooldown",
+            "Default: 60 s  |  Prevents logging the same person over and over within this time window.",
+            10, 300, self.attendance.cooldown_seconds, _on_cool
+        )
 
-    def _on_cosine_slider_change(self, val):
-        f = float(val)
-        self.engine.set_cosine_threshold(f)
-        self.cosine_val_lbl.config(text=f"{f:.2f}")
+        # Reset tip
+        _label(card,
+               "💡  Tip: If the camera is not recognizing someone correctly,\n"
+               "    go to 'Add New Person' and add more photos of them.",
+               9, color=MUTED).pack(anchor="w", pady=(10, 0))
 
-    def _on_detector_slider_change(self, val):
-        f = float(val)
-        self.engine.set_detector_threshold(f)
-        self.det_val_lbl.config(text=f"{f:.2f}")
+    def _show_settings(self):
+        self._switch_page("settings", "⚙️   Settings  —  Adjust Recognition Sensitivity")
 
-    def _on_cooldown_slider_change(self, val):
-        i = int(float(val))
-        self.attendance.cooldown_seconds = i
-        self.cooldown_val_lbl.config(text=f"{i}s")
-
-    # =========================================================================
-    # LIFECYCLE
-    # =========================================================================
-    def on_close(self):
-        self.stop_camera()
+    # ═══════════════════════════════════════════════════════════════════
+    #  LIFECYCLE
+    # ═══════════════════════════════════════════════════════════════════
+    def _on_close(self):
+        self._stop_camera()
         self.root.destroy()
 
+
+# ─────────────────────────────────────────────
+#  Entry point
+# ─────────────────────────────────────────────
 def start_gui():
     root = tk.Tk()
-    app = ModernFaceApp(root)
+    FaceApp(root)
     root.mainloop()
+
 
 if __name__ == "__main__":
     start_gui()
